@@ -1,75 +1,123 @@
-# React + TypeScript + Vite
+# FitTrack-Host-UI
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Host shell for the **FitTrack** fitness tracker. This is the entry-point React app that renders the login flow, the dashboard chrome (sidebar + top bar), and mounts feature micro-frontends over Webpack Module Federation.
 
-Currently, two official plugins are available:
+Feature pages (activities, nutrition, analytics, goals, FitoAI chat, profile) are served from a separate remote — `ContentMF` — and lazy-loaded at runtime. The host itself only owns auth, routing, user state, and the dashboard layout.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Tech stack
 
-## React Compiler
+- **React 19** + **TypeScript 5.9** (strict mode, React Compiler via Babel plugin)
+- **Webpack 5** with `ModuleFederationPlugin` for the production/dev shell (`npm run dev` / `npm run build`)
+- **Vite 7** as an alternative dev pipeline (`npm run dev:vite` / `npm run build:vite`) — useful for quick iteration without spinning up the remotes
+- **Tailwind CSS v4** + **shadcn/ui** (zinc/emerald dark theme, Lucide icons)
+- **TanStack Query** for async server state, **Zustand** for the in-memory user store, **Axios** for HTTP
+- **React Router v7** for routing, **Sonner** for toasts
 
-The React Compiler is enabled on this template. See [this documentation](https://react.dev/learn/react-compiler) for more information.
+## Project layout
 
-Note: This will impact Vite dev & build performances.
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```
+src/
+├── App.tsx                    # Router + routes (PublicRoute / ProtectedRoute)
+├── bootstrap.tsx              # Mounts <App/> under QueryClientProvider
+├── main.tsx                   # Async boundary required by Module Federation
+├── components/
+│   ├── LoginPage.tsx          # Combined login + sign-up card
+│   ├── ProtectedRoute.tsx     # Validates token, hydrates user store
+│   ├── PublicRoute.tsx        # Bounces authenticated users to /dashboard
+│   ├── dashboard/
+│   │   ├── DashboardPage.tsx  # Dashboard shell; owns the active menu item
+│   │   ├── Sidebar.tsx        # Collapsible right-side nav
+│   │   └── MainContent.tsx    # Top bar + remote MF slot
+│   └── ui/                    # shadcn primitives (button, input, card, label, sonner)
+├── constants/appConstants.ts  # BASE_API_URL, dashboard base path
+├── lib/
+│   ├── remoteLoader.tsx       # Suspense wrapper + spinner for remotes
+│   └── utils.ts               # `cn()` classname helper
+├── model/                     # LoginUserData, RegisterUserData, UserDataResponse
+├── services/
+│   ├── api/authApi.tsx        # axios calls: register / login / validateToken
+│   └── hooks/authHook.tsx     # React Query wrappers for the above
+├── store/userStore.ts         # Zustand store holding the logged-in user
+└── utils.ts                   # QueryClient + authToken localStorage helpers
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Routing
+
+| Path           | Guard           | Component       |
+| -------------- | --------------- | --------------- |
+| `/`            | `PublicRoute`   | `LoginPage`     |
+| `/:menuItem`   | `ProtectedRoute`| `DashboardPage` |
+
+`:menuItem` ∈ `{dashboard, activities, nutrition, analytics, goals, fitoai, profile}` — all forwarded to the `ContentMF` remote, which decides what to render from the `currentPath` prop.
+
+## Auth flow
+
+1. `LoginPage` posts to the user-service (`POST /api/auth/register` or `POST /api/auth/login`) and stores the returned JWT in `localStorage` under `authToken`.
+2. `ProtectedRoute` fires `GET /api/auth/validateToken` with `Authorization: Bearer <token>` on every page load. A valid response is written into the Zustand user store; any failure removes the token, toasts, and redirects to `/`.
+3. `PublicRoute` does the inverse — if there's a valid token, it redirects into `/dashboard` so you can't see the login page while logged in.
+
+The backend is expected at `BASE_API_URL` (see `src/constants/appConstants.ts`, defaults to `http://localhost:8071/api` — the FitTrack API gateway).
+
+## Module Federation
+
+Declared in `webpack.config.cjs`:
 
 ```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
+new ModuleFederationPlugin({
+  name: "fitTrackHost",
+  remotes: {
+    ContentMF: "ContentMF@http://localhost:3001/remoteEntry.js",
   },
-])
+  shared: {
+    react:        { singleton: true, eager: true },
+    "react-dom":  { singleton: true, eager: true },
+    "react-router":{ singleton: true, eager: true },
+  },
+})
 ```
+
+The host imports the remote lazily from `DashboardPage.tsx`:
+
+```ts
+const ContentApp = lazy(() => import("ContentMF/ContentMF"));
+```
+
+`RemoteWrapper` (from `src/lib/remoteLoader.tsx`) provides a Suspense boundary with an emerald spinner while the remote chunk loads.
+
+## Prerequisites
+
+- Node.js **20+**
+- The `ContentMF` remote running on `http://localhost:3001`
+- The FitTrack API gateway reachable at `BASE_API_URL` (default `http://localhost:8071`)
+
+## Run locally
+
+```bash
+npm install
+
+# Webpack dev server with Module Federation wired up (recommended)
+npm run dev
+# → http://localhost:3000
+
+# Or: Vite, without Module Federation (faster HMR, remotes unavailable)
+npm run dev:vite
+```
+
+## Build
+
+```bash
+npm run build       # webpack production build → dist/
+npm run build:vite  # vite build (tsc + vite) → dist/
+```
+
+## Lint
+
+```bash
+npm run lint
+```
+
+## Related FitTrack services
+
+- [`FitTrack-user-service`](https://github.com/sachin-gupta99/FitTrack-user-service) — auth + user profiles (Spring Boot)
+- [`FitTrack-eureka-service`](https://github.com/sachin-gupta99/FitTrack-eureka-service) — service registry
+- `ContentMF` — remote that serves the dashboard, activities, nutrition, analytics, goals, profile, and FitoAI pages
