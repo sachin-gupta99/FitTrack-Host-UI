@@ -4,6 +4,9 @@ Host shell for the **FitTrack** fitness tracker. This is the entry-point React a
 
 Feature pages (activities, nutrition, analytics, goals, FitoAI chat, profile) are served from a separate remote — `ContentMF` — and lazy-loaded at runtime. The host itself only owns auth, routing, user state, and the dashboard layout.
 
+<img width="1212" height="811" alt="image" src="https://github.com/user-attachments/assets/3138daeb-6840-4942-8e4e-e8506d652340" />
+
+
 ## Tech stack
 
 - **React 19** + **TypeScript 5.9** (strict mode, React Compiler via Babel plugin)
