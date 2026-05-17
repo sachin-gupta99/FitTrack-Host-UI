@@ -59,7 +59,7 @@ src/
 2. `ProtectedRoute` fires `GET /api/auth/validateToken` with `Authorization: Bearer <token>` on every page load. A valid response is written into the Zustand user store; any failure removes the token, toasts, and redirects to `/`.
 3. `PublicRoute` does the inverse — if there's a valid token, it redirects into `/dashboard` so you can't see the login page while logged in.
 
-The backend is expected at `BASE_API_URL` (see `src/constants/appConstants.ts`, defaults to `http://localhost:8071/api` — the FitTrack API gateway).
+The backend is expected at `BASE_API_URL` (see `src/constants/appConstants.ts`, defaults to `http://localhost:8071/api` — calls go directly to `FitTrack-user-service`; there is no API gateway in the MVP).
 
 ## Module Federation
 
